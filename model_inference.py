@@ -1,70 +1,70 @@
-import io
-import numpy as np
-import torch
+# model_inference.py
+
+from ultralytics import YOLO
 import onnxruntime as ort
 from PIL import Image
+import numpy as np
+import io
 
-# Load PyTorch model
-def load_models(model_path):
-    if model_path.endswith('.pt'):
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_path, force_reload=False)
-        model.eval()
-        return model
-    elif model_path.endswith('.onnx'):
-        session = ort.InferenceSession(model_path)
-        return session
-    else:
-        raise ValueError("Unsupported model format. Use .pt or .onnx")
 
-# Run inference with PyTorch model
+# --------------------------
+# Load YOLOv8 and ONNX models
+# --------------------------
+def load_models(pt_path='best.pt', onnx_path='best.onnx'):
+    """Load YOLOv8 PyTorch model and ONNX session."""
+    pt_model = YOLO(pt_path)                      # Load YOLOv8 model
+    onnx_session = ort.InferenceSession(onnx_path)
+    return pt_model, onnx_session
+
+
+# --------------------------
+# Run inference with YOLOv8 (PyTorch)
+# --------------------------
 def run_pytorch_inference(model, image_bytes):
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    results = model(img)
-    # results.xyxy[0] shape: (num_detections, 6) [x1, y1, x2, y2, confidence, class]
-    detections = results.xyxy[0].cpu().numpy()
-    classes = results.names
-    output = []
-    for det in detections:
-        x1, y1, x2, y2, conf, cls = det
-        output.append({
-            "bbox": [x1, y1, x2, y2],
+    """
+    Run YOLOv8 PyTorch model on an image.
+
+    Returns:
+        detections: List of dicts with keys: bbox, confidence, class_id, label
+    """
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    results = model(img, verbose=False)[0]
+
+    boxes = results.boxes.xyxy.cpu().numpy()      # Bounding boxes (x1, y1, x2, y2)
+    confs = results.boxes.conf.cpu().numpy()      # Confidence scores
+    class_ids = results.boxes.cls.cpu().numpy()   # Class IDs
+    class_names = model.names                     # ID to name mapping
+
+    detections = []
+    for bbox, conf, cls_id in zip(boxes, confs, class_ids):
+        detections.append({
+            "bbox": bbox.tolist(),
             "confidence": float(conf),
-            "class_id": int(cls),
-            "class_name": classes[int(cls)]
+            "class_id": int(cls_id),
+            "label": class_names[int(cls_id)].lower()
         })
-    return output
 
-# Preprocess image for ONNX model
-def preprocess_onnx(image_bytes, input_size=(640, 640)):
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    img = img.resize(input_size)
-    img_np = np.array(img).astype('float32') / 255.0  # normalize to 0-1
-    img_np = np.transpose(img_np, (2, 0, 1))  # HWC to CHW
-    img_np = np.expand_dims(img_np, axis=0)  # add batch dim
-    return img_np
+    return detections
 
+
+# --------------------------
 # Run inference with ONNX model
-def run_onnx_inference(session, image_bytes):
+# --------------------------
+def run_onnx_inference(session, image_bytes, input_size=(640, 640)):
+    """
+    Run inference using ONNX model on an image.
+
+    Returns:
+        Raw output (to be parsed separately)
+    """
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img = img.resize(input_size)
+    img_np = np.array(img).astype(np.float32) / 255.0
+    img_np = np.transpose(img_np, (2, 0, 1))        # CHW
+    img_np = np.expand_dims(img_np, axis=0)         # NCHW
+
     input_name = session.get_inputs()[0].name
-    input_tensor = preprocess_onnx(image_bytes)
-    outputs = session.run(None, {input_name: input_tensor})
-    
-    # Assuming output[0] is detection results in format (num_detections, 6) [x1,y1,x2,y2,confidence,class]
-    detections = outputs[0]
-    output = []
-    # NOTE: You must know your class names for ONNX model - define here:
-    classes = ["block loss", "crack on ashpat", "long crack", "opening on the wall", 
-               "vegetation on wall", "vegetation on slope", "vertical crack", "wall deformation", 
-               "bad foundation", "corrosion", "slope deformation"]
-    
-    for det in detections:
-        if len(det) < 6:
-            continue
-        x1, y1, x2, y2, conf, cls = det
-        output.append({
-            "bbox": [x1, y1, x2, y2],
-            "confidence": float(conf),
-            "class_id": int(cls),
-            "class_name": classes[int(cls)] if int(cls) < len(classes) else "unknown"
-        })
-    return output
+    output_name = session.get_outputs()[0].name
+    outputs = session.run([output_name], {input_name: img_np})
+
+    return outputs[0]  # Model-specific post-processing needed elsewhere
