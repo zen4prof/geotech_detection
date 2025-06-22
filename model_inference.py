@@ -1,42 +1,48 @@
 # model_inference.py
-
-from ultralytics import YOLO
 import onnxruntime as ort
-from PIL import Image
-import io
 import numpy as np
 import cv2
 
-def load_onnx_model(onnx_path="best.onnx"):
-    session = ort.InferenceSession(onnx_path)
+
+def letterbox(image, new_shape=(640, 640), color=(114, 114, 114)):
+    """Resize and pad image while meeting stride-multiple constraints."""
+    shape = image.shape[:2]  # current shape [height, width]
+    ratio = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    new_unpad = int(round(shape[1] * ratio)), int(round(shape[0] * ratio))
+    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # width, height padding
+    dw /= 2  # divide padding into 2 sides
+    dh /= 2
+
+    # resize
+    resized = cv2.resize(image, new_unpad, interpolation=cv2.INTER_LINEAR)
+    # pad
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    padded = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
+
+    return padded, ratio, top, left
+
+
+def load_onnx_model(path):
+    """Load ONNX model and return session."""
+    session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
     return session
 
-def preprocess_image(image, input_size=(640, 640)):
-    # Resize and pad to keep aspect ratio
-    h0, w0 = image.shape[:2]
-    r = min(input_size[0] / h0, input_size[1] / w0)
-    new_unpad = (int(w0 * r), int(h0 * r))
-    resized = cv2.resize(image, new_unpad, interpolation=cv2.INTER_LINEAR)
-    
-    # Create padded image
-    padded = np.full((input_size[1], input_size[0], 3), 114, dtype=np.uint8)
-    dw, dh = (input_size[0] - new_unpad[0]) // 2, (input_size[1] - new_unpad[1]) // 2
-    padded[dh:dh+new_unpad[1], dw:dw+new_unpad[0], :] = resized
-
-    # Convert BGR to RGB
-    img = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
-
-    # Normalize to 0-1
-    img = img.astype(np.float32) / 255.0
-
-    # HWC to CHW
-    img = np.transpose(img, (2, 0, 1))
-    img = np.expand_dims(img, axis=0)  # Add batch dimension
-    img = np.ascontiguousarray(img)
-
-    return img, r, dw, dh
 
 def run_onnx_inference(session, image):
+    """
+    Preprocess image, run ONNX inference, return outputs and resize info.
+    image: NumPy array (BGR)
+    """
+    # Resize and pad image
+    img_resized, ratio, pad_top, pad_left = letterbox(image, new_shape=(640, 640))
+
+    # Convert to CHW format, normalize, add batch dim
+    img_input = img_resized.transpose(2, 0, 1)  # HWC to CHW
+    img_input = np.expand_dims(img_input, 0).astype(np.float32) / 255.0  # scale to [0,1]
+
+    # Inference
     input_name = session.get_inputs()[0].name
-    outputs = session.run(None, {input_name: image})
-    return outputs
+    outputs = session.run(None, {input_name: img_input})
+
+    return outputs[0], ratio, pad_top, pad_left
