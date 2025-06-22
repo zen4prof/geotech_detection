@@ -1,5 +1,4 @@
 # feedback_data.py
-
 feedback_data = {
     "block loss": {
         "score": 3,
@@ -68,3 +67,10 @@ feedback_data = {
         "priority": "High"
     }
 }
+
+def get_feedback_info():
+    """Return feedback dictionary and class list for external use."""
+    return {
+        "class_names": list(feedback_data.keys()),
+        "data":        feedback_data,
+    }
