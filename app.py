@@ -1,60 +1,63 @@
 import streamlit as st
-from model_inference import load_onnx_model, run_onnx_inference
-from parser import parse_detections
-from recommendation import generate_recommendations
-from feedback_data import get_feedback_info
 import numpy as np
 from PIL import Image
-import io
 
-# Cache model loading for performance
+from model_inference import load_onnx_model, run_onnx_inference
+from parser import parse_onnx_output               # <- use the new parser name
+from recommendation import generate_recommendations
+from feedback_data import get_feedback_info
+
+# -------------------- Model cache --------------------
 @st.cache_resource
-def load_models():
-    onnx_session = load_onnx_model('best.onnx')
-    return onnx_session
+def load_session():
+    return load_onnx_model("best.onnx")
 
-def main():
-    st.title("Geotechnical Fault Detection")
-    st.write("Upload images to detect and get recommendations on geotechnical faults.")
+onnx_session = load_session()
 
-    # Load ONNX model once
-    onnx_session = load_models()
+# -------------------- Streamlit UI --------------------
+st.title("Geotechnical Fault Detection (ONNX)")
 
-    uploaded_file = st.file_uploader("Choose an image", type=['png', 'jpg', 'jpeg'])
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+uploaded_file = st.file_uploader(
+    "Choose an image", type=["png", "jpg", "jpeg"]
+)
 
-        # Convert PIL image to numpy array for model input
-        img_array = np.array(image)
+if uploaded_file:
+    image_pil = Image.open(uploaded_file).convert("RGB")
+    st.image(image_pil, caption="Uploaded Image", use_column_width=True)
 
-        # Run inference
-        preds = run_onnx_inference(onnx_session, img_array)
+    image_np = np.array(image_pil)
 
-        # Parse detections
-        detections = parse_detections(preds)
+    # ---------- Inference ----------
+    outputs, scale, pad_top, pad_left = run_onnx_inference(
+        onnx_session, image_np
+    )
 
-        # Show raw detections (optional)
-        st.subheader("Raw Detections")
-        st.write(detections)
+    # ---------- Parse detections ----------
+    detections = parse_onnx_output(
+        outputs, scale, pad_top, pad_left, image_np.shape[:2]
+    )
 
-        # Generate recommendations
-        class_names = get_feedback_info().get('class_names', None)  # Adjust based on your feedback_data
-        recommendations = generate_recommendations(detections, class_names)
+    st.subheader("Parsed Detections")
+    st.write(detections)
 
-        st.subheader("Recommendations")
-        for rec in recommendations:
-            st.write("- " + rec)
+    # ---------- Recommendations ----------
+    fb_info = get_feedback_info()
+    class_names = fb_info["class_names"]
 
-        # Optionally: Export recommendations as text
-        if st.button("Download Recommendations"):
-            recommendation_text = "\n".join(recommendations)
-            st.download_button(
-                label="Download as TXT",
-                data=recommendation_text,
-                file_name="recommendations.txt",
-                mime="text/plain"
-            )
+    recs = generate_recommendations(detections, class_names)
 
-if __name__ == "__main__":
-    main()
+    st.subheader("Recommendations")
+    for r in recs:
+        st.write(f"- {r}")
+
+    # ---------- Download ----------
+    if st.button("Download Recommendations"):
+        txt = "\n".join(recs)
+        st.download_button(
+            "Download as TXT",
+            data=txt,
+            file_name="recommendations.txt",
+            mime="text/plain",
+        )
+else:
+    st.info("Upload an image to start.")
