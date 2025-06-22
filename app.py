@@ -1,86 +1,84 @@
-# app.py
 import streamlit as st
-import numpy as np
-from PIL import Image
-
 from model_inference import load_onnx_model, run_onnx_inference
-from parser import parse_detections                     # wrapper to parse_onnx_output
+from parser import parse_detections
 from recommendation import generate_recommendations
-from feedback_data import get_feedback_info             # returns class list + dict
+from feedback_data import get_feedback_info
+from PIL import Image
+import numpy as np
 
-
-# ------------------------------------------------------------------
-# Cache the ONNX session so we load the model only once per session
-# ------------------------------------------------------------------
 @st.cache_resource
-def load_session():
-    return load_onnx_model("best.onnx")                 # make sure best.onnx is present
+def load_models():
+    onnx_session = load_onnx_model('best.onnx')
+    return onnx_session
 
+def main():
+    st.title("Geotechnical Fault Detection")
+    st.write("Upload images to detect and get recommendations on geotechnical faults.")
 
-onnx_session = load_session()
+    onnx_session = load_models()
 
+    uploaded_file = st.file_uploader("Choose an image", type=['png', 'jpg', 'jpeg'])
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file).convert("RGB")
 
-# ------------------------------------------------------------------
-# Streamlit user interface
-# ------------------------------------------------------------------
-st.title("Geotechnical Fault Detection 📐")
-st.write(
-    """
-    Upload a site photograph; the app will detect faults using an ONNX model
-    and provide severity‐based maintenance recommendations.
-    """
-)
+        # Show uploaded image
+        st.image(image, caption="Uploaded Image", use_column_width=True)
 
-uploaded_file = st.file_uploader("Upload image", type=["jpg", "jpeg", "png"])
+        # Convert to numpy array
+        img_np = np.array(image)
 
-# Optional confidence filter
-conf_thres = st.slider("Confidence threshold", 0.0, 1.0, 0.25, 0.05)
+        # Preprocess image to meet model input size, e.g., 640x640
+        # (you can adjust this depending on your model)
+        input_size = 640
+        h, w = img_np.shape[:2]
+        scale = min(input_size / w, input_size / h)
 
-if uploaded_file:
-    # ► Display original image
-    img_pil = Image.open(uploaded_file).convert("RGB")
-    st.image(img_pil, caption="Uploaded image", use_column_width=True)
+        # Resize while keeping aspect ratio
+        new_w, new_h = int(w * scale), int(h * scale)
+        resized_img = np.array(image.resize((new_w, new_h)))
 
-    # ► Convert to NumPy array (BGR for OpenCV-style preprocessing)
-    img_np = np.array(img_pil)[:, :, ::-1]  # RGB → BGR
+        # Pad to (input_size, input_size)
+        pad_w = input_size - new_w
+        pad_h = input_size - new_h
 
-    # ► Inference
-    raw_outputs, scale, pad_top, pad_left = run_onnx_inference(
-        onnx_session, img_np
-    )
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
 
-    # ► Parse model output → list[dict]
-    detections = parse_detections(
-        raw_outputs, scale, pad_top, pad_left, img_np.shape[:2],
-        conf_thres=conf_thres
-    )
+        # Create padded image with zeros (black)
+        img_padded = np.zeros((input_size, input_size, 3), dtype=np.uint8)
+        img_padded[pad_top:pad_top+new_h, pad_left:pad_left+new_w, :] = resized_img
 
-    # ► Display detections JSON for debugging
-    st.subheader("Detections")
-    st.json(detections)
+        # Run ONNX inference
+        preds = run_onnx_inference(onnx_session, img_padded)
 
-    # ► Build recommendations
-    fb_info      = get_feedback_info()
-    class_names  = fb_info["class_names"]
-    feedback_dict = fb_info["data"]
+        # Parse detections with correct args
+        conf_thres = 0.25
+        detections = parse_detections(preds, scale, pad_top, pad_left, conf_threshold=conf_thres)
 
-    recs = generate_recommendations(detections, class_names)
+        # Show raw detections (optional)
+        st.subheader("Raw Detections")
+        st.write(detections)
 
-    st.subheader("Recommendations")
-    if recs:
-        for r in recs:
-            st.markdown(f"• {r}")
-    else:
-        st.write("No detections above confidence threshold.")
+        # Generate recommendations
+        feedback_info = get_feedback_info()
+        class_names = feedback_info.get('class_names', [])
+        recommendations = generate_recommendations(detections, class_names)
 
-    # ► Download recommendations as TXT
-    if recs and st.button("Download recommendations"):
-        txt = "\n".join(recs)
-        st.download_button(
-            label="Download TXT",
-            data=txt,
-            file_name="recommendations.txt",
-            mime="text/plain",
-        )
-else:
-    st.info("Please upload an image to begin.")
+        st.subheader("Recommendations")
+        for rec in recommendations:
+            st.write("- " + rec)
+
+        # Optional download button for recommendations text
+        if st.button("Download Recommendations"):
+            rec_text = "\n".join(recommendations)
+            st.download_button(
+                label="Download as TXT",
+                data=rec_text,
+                file_name="recommendations.txt",
+                mime="text/plain"
+            )
+
+if __name__ == "__main__":
+    main()
