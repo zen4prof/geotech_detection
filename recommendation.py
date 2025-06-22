@@ -1,44 +1,32 @@
-def generate_recommendations(detections, class_names=None, confidence_threshold=0.3):
+# recommendation.py
+
+from feedback_data import get_feedback_info
+
+feedback_info = get_feedback_info()
+feedback_dict = feedback_info["data"]
+
+def generate_recommendations(detections, class_names):
     """
-    Generate recommendations based on detected objects.
+    Given a list of detected classes (strings) and all class_names,
+    return a list of human-readable recommendations.
 
     Args:
-        detections (list of dict): List of detections with keys ['bbox', 'confidence', 'class']
-        class_names (list of str, optional): List mapping class indices to human-readable names
-        confidence_threshold (float): Minimum confidence to consider a detection for recommendations
+        detections (list of str): List of detected fault class labels.
+        class_names (list of str): List of all known fault class names.
 
     Returns:
-        list of str: Recommendations messages
+        list of str: Recommendations corresponding to detected faults.
     """
     recommendations = []
-
-    if not detections:
-        return ["No faults or issues detected."]
-
-    for det in detections:
-        conf = det['confidence']
-        cls = det['class']
-
-        if conf < confidence_threshold:
-            continue
-
-        class_label = class_names[cls] if class_names and cls < len(class_names) else f"class_{cls}"
-
-        # Example recommendations — customize based on your classes and domain
-        if class_label.lower() in ['crack', 'fault', 'damage']:
+    for detected_class in detections:
+        if detected_class in class_names and detected_class in feedback_dict:
+            rec = feedback_dict[detected_class]["recommendation"]
+            severity = feedback_dict[detected_class]["severity"]
+            priority = feedback_dict[detected_class]["priority"]
             recommendations.append(
-                f"Detected potential {class_label} with confidence {conf:.2f}. Recommend further inspection and repair."
-            )
-        elif class_label.lower() == 'erosion':
-            recommendations.append(
-                f"Erosion detected with confidence {conf:.2f}. Consider preventative measures to avoid structural issues."
+                f"{detected_class.title()} (Severity: {severity}, Priority: {priority}): {rec}"
             )
         else:
-            recommendations.append(
-                f"Detected {class_label} with confidence {conf:.2f}. Review as necessary."
-            )
-
-    if not recommendations:
-        recommendations.append("No significant detections above confidence threshold.")
-
+            # Fallback message if class not found in feedback dict
+            recommendations.append(f"{detected_class.title()}: No recommendation available.")
     return recommendations
