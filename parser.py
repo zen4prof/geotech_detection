@@ -1,49 +1,40 @@
-from feedback_data import feedback_data
+import numpy as np
 
-def parse_model_output(detections):
+def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45):
     """
-    Parses the model detection output and enriches with feedback data.
-
-    Parameters:
-    - detections: list of dicts, each dict with keys: 'label', 'confidence', 'bbox'
-      Example:
-      [
-        {"label": "block loss", "confidence": 0.85, "bbox": [x1, y1, x2, y2]},
-        {"label": "crack on ashpat", "confidence": 0.78, "bbox": [x1, y1, x2, y2]},
-      ]
-
+    Perform Non-Maximum Suppression on inference results.
+    
+    Args:
+        prediction: numpy array, shape (num_boxes, 6) 
+                    columns: [x1, y1, x2, y2, confidence, class]
+        conf_thres: confidence threshold to filter boxes
+        iou_thres: IOU threshold for NMS
+    
     Returns:
-    - List of dicts with enriched information including severity, recommendation, priority.
+        List of filtered boxes after NMS (each box as [x1, y1, x2, y2, conf, class])
     """
-    results = []
+    # Filter out low confidence detections
+    mask = prediction[:, 4] >= conf_thres
+    prediction = prediction[mask]
 
-    for det in detections:
-        label = det.get("label")
-        confidence = det.get("confidence", 0)
-        bbox = det.get("bbox", [])
+    if not prediction.shape[0]:
+        return []
 
-        feedback = feedback_data.get(label, None)
+    # Coordinates
+    boxes = prediction[:, :4]
+    scores = prediction[:, 4]
+    classes = prediction[:, 5]
 
-        if feedback:
-            results.append({
-                "label": label,
-                "confidence": confidence,
-                "bbox": bbox,
-                "score": feedback["score"],
-                "severity": feedback["severity"],
-                "recommendation": feedback["recommendation"],
-                "priority": feedback["priority"],
-            })
-        else:
-            # For unknown detections, provide a default fallback
-            results.append({
-                "label": label,
-                "confidence": confidence,
-                "bbox": bbox,
-                "score": None,
-                "severity": "Unknown",
-                "recommendation": "No recommendation available.",
-                "priority": "Low"
-            })
+    # Compute areas of boxes
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
 
-    return results
+    # Sort by confidence
+    order = scores.argsort()[::-1]
+
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+
+        # Compute IoU of the remaining boxes with the box i
+        xx1 = np.maximum(boxes[i, 0], boxes[order[1:], 0])
