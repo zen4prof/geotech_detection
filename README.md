@@ -1,6 +1,11 @@
 # Fault Detection and Recommendation System 🧠⚠️
 
 This Streamlit app uses a trained YOLOv8 model to detect structural/geotechnical faults from uploaded images and provide actionable recommendations based on predefined severity, priority, and expert feedback.
+## Setup
+
+1. Clone this repo
+2. Create and activate a Python environment (recommended)
+3. Install dependencies:
 
 ## 🚀 Features
 
@@ -21,3 +26,6 @@ This Streamlit app uses a trained YOLOv8 model to detect structural/geotechnical
 ├── recommendation.py      # Maps faults to recommendations
 ├── requirements.txt       # Dependencies
 └── README.md              # Project info
+
+# Geotech Fault Detection Streamlit App (ONNX)
+
