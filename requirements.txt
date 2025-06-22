@@ -5,3 +5,4 @@ onnxruntime
 Pillow
 ultralytics
 opencv-python-headless>=4.10
+seaborn
