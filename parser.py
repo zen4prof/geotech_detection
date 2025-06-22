@@ -38,3 +38,12 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45):
 
         # Compute IoU of the remaining boxes with the box i
         xx1 = np.maximum(boxes[i, 0], boxes[order[1:], 0])
+
+# parser.py  (append to the file)
+
+def parse_detections(outputs, scale, pad_top, pad_left, original_shape,
+                     conf_thres=0.25, iou_thres=0.45):
+    """Backward-compat wrapper so app.py can import parse_detections."""
+    return parse_onnx_output(outputs, scale, pad_top, pad_left,
+                             original_shape, conf_thres, iou_thres)
+
